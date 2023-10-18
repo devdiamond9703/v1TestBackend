@@ -9,4 +9,8 @@ class Product extends Model
 {
     use HasFactory;
     protected $fillable = ['name', 'code'];
+
+    public function material() {
+        return $this->belongstoMany('App\Models\Material');
+    }
 }

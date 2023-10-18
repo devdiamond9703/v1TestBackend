@@ -7,13 +7,16 @@ use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Material;
 use App\Http\Requests\MaterialRequest;
+use App\Http\Resources\Material\IndexMaterialResource;
+
+
 class MaterialController extends Controller
 {
     public function index() {
-        $data = DB::table('materials AS m')
-                ->select('m.id', 'm.name')
-                ->get();
-        return response()->json($data);
+        $data = Material::from('materials as m')
+            ->select('m.id', 'm.name')
+            ->get();
+        return IndexMaterialResource::collection($data);
     }
 
     public function store(MaterialRequest $request) {

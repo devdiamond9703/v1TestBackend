@@ -6,16 +6,18 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\ProductMaterial;
 use App\Http\Requests\ProductRequest;
-
+use App\Http\Resources\Product\IndexProductResource;
+use App\Http\Resources\Product\MaterialsByProductsResource;
 
 class ProductController extends Controller
 {
     public function index() {
-        $data = DB::table('products AS p')
+        $data = Product::from('products AS p')
                 ->select('p.id', 'p.name', 'p.code')
                 ->get();
-        return response()->json($data);
+        return IndexProductResource::collection($data);
     }
 
     public function store(ProductRequest $request) {
@@ -30,4 +32,18 @@ class ProductController extends Controller
         ]);
 
     }
+
+    public function getMaterialsByProduct(Request $request) {
+        $data = ProductMaterial::from('product_materials AS pm')
+                ->select(
+                    'pm.id AS product_material_id',
+                    'm.name AS material_name',
+                    'pm.quantity As quantity'
+                )
+                ->leftJoin('materials AS m', 'pm.material_id', '=', 'm.id')
+                ->where('pm.product_id', $request->id)
+                ->get();
+        return MaterialsByProductsResource::collection($data);
+    }
+
 }
