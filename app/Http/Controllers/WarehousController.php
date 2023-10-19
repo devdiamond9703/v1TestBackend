@@ -10,6 +10,8 @@ use App\Models\Warehous;
 use App\Models\ProductMaterial;
 use App\Http\Requests\WarehousRequest;
 use App\Http\Resources\Warehous\IndexWarehousResource;
+use App\Http\Resources\Warehous\OrderWarehousResource;
+
 
 class WarehousController extends Controller
 {
@@ -83,18 +85,24 @@ class WarehousController extends Controller
 
         foreach($items as $item) {
 
-            if($arr[$item['material_id']] != 0) {
+            if($arr[$item['material_id']] != 0 && $item->qty != 0) {
 
                 $result = $item->qty - $arr[$item['material_id']];
 
-                if( $result <= 0 ) {
+                if( $result < 0 ) {
                     $details['result']['product_materials'][] = [
                         "warehouse_id" => $item->warehaus_id,
                         "material_name" => $item->material_name,
                         "qty" => $item->qty,
                         "price" => $item->price,
                     ];
+                    Warehous::create([
+                        'material_id' => $item['material_id'],
+                        'remainder' => $item->qty * -1,
+                        'price' => $item->price
+                    ]);
                     $arr[$item['material_id']] = $result * -1;
+
                 }
 
                 if( $result > 0 ) {
@@ -104,16 +112,18 @@ class WarehousController extends Controller
                         "qty" => $arr[$item['material_id']],
                         "price" => $item->price,
                     ];
+                    Warehous::create([
+                        'material_id' => $item['material_id'],
+                        'remainder' => $arr[$item['material_id']] * -1,
+                        'price' => $item->price
+                    ]);
                     $arr[$item['material_id']] = 0;
                 }
 
             }
         }
 
-        return response()->json([
-            $details,
-        ]);
-
+        return new OrderWarehousResource($details);
     }
 
 }

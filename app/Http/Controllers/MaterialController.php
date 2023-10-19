@@ -25,7 +25,7 @@ class MaterialController extends Controller
             'name' => $request->name,
         ]);
         return response()->json([
-            "status" => 200,
+            "status" => true,
             "message" => "Save successfully",
         ]);
     }
