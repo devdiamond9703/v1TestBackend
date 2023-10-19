@@ -27,7 +27,7 @@ class ProductController extends Controller
             'code' => 'XML_' . $request->code
         ]);
         return response()->json([
-            "status" => 200,
+            "status" => true,
             "message" => "Save successfully",
         ]);
 

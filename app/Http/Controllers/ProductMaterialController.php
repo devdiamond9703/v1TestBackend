@@ -19,7 +19,7 @@ class ProductMaterialController extends Controller
             'quantity' => $request->quantity
         ]);
         return response()->json([
-            "status" => 200,
+            "status" => true,
             "message" => "Save successfully",
         ]);
     }
