@@ -37,7 +37,7 @@ class WarehousController extends Controller
             'price' => $request->price
         ]);
         return response()->json([
-            "status" => 200,
+            "status" => true,
             "message" => "Save successfully",
         ]);
 
