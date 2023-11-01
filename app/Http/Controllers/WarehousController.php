@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Session;
 use App\Models\Product;
 use App\Models\Warehous;
 use App\Models\ProductMaterial;
@@ -20,7 +21,7 @@ class WarehousController extends Controller
             ->select(
                 'w.id AS warehous_id',
                 'm.name AS material_name',
-                DB::raw('sum(w.remainder) as remainder'),
+                'w.remainder as remainder',
                 'w.price'
             )
             ->leftJoin('materials AS m', 'w.material_id', '=', 'm.id')
@@ -40,11 +41,21 @@ class WarehousController extends Controller
             "status" => true,
             "message" => "Save successfully",
         ]);
-
     }
 
     public function order(Request $request) {
+        // return response()->json([
+        //     "status" => Session::flush(),
+        // ]);
 
+        //params
+        $materialIds = null;
+        $groupWarehous = null;
+        $materialQuantity = [];
+        $details = [];
+
+        // step 1
+        $storeSession = Session::get('store', []);
         $modelProduct = Product::find($request->product_id);
         $materials = ProductMaterial::from('product_materials AS pm')
             ->select(
@@ -53,77 +64,133 @@ class WarehousController extends Controller
             )
             ->where('pm.product_id', '=', $request->product_id)
             ->get();
+        foreach( $materials as $material ) {
+            $materialQuantity[$material->material_id] = $material->quantity * $request->quantity;
+        }
+        $materialIds = $materials->pluck('material_id')->toArray();
 
-        //params
-        $arr = [];
-        $details = [];
-        $ids = null;
+        // step 2
+        $details = [
+            "product_name" => $modelProduct->name,
+            "product_qty" => $request->quantity
+        ];
 
-        foreach($materials as $material) {
-            $arr[$material->material_id] = $material->quantity * $request->quantity;
+        $getStore = $this->getWarehous($materialIds);
+        $siklCount = 0;
+        foreach( $getStore["data"] as $item ) {
+            $siklCount++;
+            if(!empty($storeSession[0][$item->warehaus_id])) {
+                if($storeSession[0][$item->warehaus_id]['quantity'] != 0) {
+                    $item->quantity = $storeSession[0][$item->warehaus_id]['quantity'];
+                } else {
+                    $details['product_materials'][] = [
+                        "warehouse_id" => null,
+                        "material_name" => $item->material_name,
+                        "qty" => $materialQuantity[$item->material_id],
+                        "price" => null,
+                    ];
+                    continue;
+                }
+            }
+
+            // group detail
+            if( $item->quantity != 0 ) {
+                if( $materialQuantity[$item->material_id] != 0 ) {
+                    $bronQuantity = 0;
+                    $result = $item->quantity - $materialQuantity[$item['material_id']];
+
+                    if( $getStore['count'][$item->material_id] == $siklCount && $result < 0) {
+                        if(!empty($storeSession[0][$item->warehaus_id])) {
+                            $storeSession[0][$item->warehaus_id]['quantity'] = $storeSession[0][$item->warehaus_id]['quantity'] - $item->quantity;
+                        }
+                        $details['product_materials'][] = [
+                            "warehouse_id" => null,
+                            "material_name" => $item->material_name,
+                            "qty" => $result * -1,
+                            "price" => null,
+                        ];
+                        continue;
+                    }
+
+                    if( $result <= 0 ) {
+                        $bronQuantity = $item->quantity;
+                        $materialQuantity[$item['material_id']] = $result * -1;
+                    }
+
+                    if( $result > 0 ) {
+                        $bronQuantity = $materialQuantity[$item['material_id']];
+                        $materialQuantity[$item['material_id']] = 0;
+                    }
+
+                    $details['product_materials'][] = [
+                        "warehouse_id" => $item->warehaus_id,
+                        "material_name" => $item->material_name,
+                        "qty" => $bronQuantity,
+                        "price" => $item->price,
+                    ];
+
+                    // session store quantity update
+                    if(!empty($storeSession[0][$item->warehaus_id])) {
+                        $storeSession[0][$item->warehaus_id]['quantity'] = $storeSession[0][$item->warehaus_id]['quantity'] - $bronQuantity;
+                    } else {
+                        $groupWarehous[$item->warehaus_id] = [
+                            "warehaus_id" => $item->warehaus_id,
+                            "quantity" => $item->quantity - $bronQuantity
+                        ];
+                    }
+                }
+            } else {
+                $details['product_materials'][] = [
+                    "warehouse_id" => null,
+                    "material_name" => $item->material_name,
+                    "qty" => $materialQuantity[$item->material_id],
+                    "price" => null,
+                ];
+                continue;
+            }
+
         }
 
-        $ids = $materials->pluck('material_id')->toArray();
+        if( !empty($storeSession[0]) ) {
+            Session::forget("store");
+            $merge = array_merge((array) $storeSession[0], (array) $groupWarehous);
+            Session::push('store', $merge);
+        } else {
+            Session::push('store', $groupWarehous);
+        }
 
+        Session::push('orders.result', $details);
+        return response()->json([
+            "store" => Session::get('store', []),
+            "orders" => Session::get('orders', []),
+        ]);
+
+        return new OrderWarehousResource(Session::get('orders', []));
+    }
+
+    private function getWarehous($materialIds = []) {
         $items = Warehous::from('warehouses AS w')
             ->select(
                 'w.material_id AS material_id',
                 'w.id AS warehaus_id',
                 'm.name AS material_name',
-                'w.remainder AS qty',
-                'w.price AS price',
+                'w.remainder AS quantity',
+                'w.price AS price'
             )
             ->leftJoin('materials AS m', 'w.material_id', '=', 'm.id')
-            ->whereIn('w.material_id', $ids)
+            ->whereIn('w.material_id', $materialIds)
             ->groupBy('w.material_id', 'w.price')
             ->get();
 
-        $details['result'] = [
-            "product_name" => $modelProduct->name,
-            "product_qty" => $request->quantity
+        $collection = collect($items);
+        $duplicatesCount = $collection->groupBy('material_id')->map(function ($row) {
+            return $row->count();
+        });
+
+        return [
+            "data" => $items,
+            "count" => $duplicatesCount
         ];
-
-        foreach($items as $item) {
-
-            if($arr[$item['material_id']] != 0 && $item->qty != 0) {
-
-                $result = $item->qty - $arr[$item['material_id']];
-
-                if( $result < 0 ) {
-                    $details['result']['product_materials'][] = [
-                        "warehouse_id" => $item->warehaus_id,
-                        "material_name" => $item->material_name,
-                        "qty" => $item->qty,
-                        "price" => $item->price,
-                    ];
-                    Warehous::create([
-                        'material_id' => $item['material_id'],
-                        'remainder' => $item->qty * -1,
-                        'price' => $item->price
-                    ]);
-                    $arr[$item['material_id']] = $result * -1;
-
-                }
-
-                if( $result > 0 ) {
-                    $details['result']['product_materials'][] = [
-                        "warehouse_id" => $item->warehaus_id,
-                        "material_name" => $item->material_name,
-                        "qty" => $arr[$item['material_id']],
-                        "price" => $item->price,
-                    ];
-                    Warehous::create([
-                        'material_id' => $item['material_id'],
-                        'remainder' => $arr[$item['material_id']] * -1,
-                        'price' => $item->price
-                    ]);
-                    $arr[$item['material_id']] = 0;
-                }
-
-            }
-        }
-
-        return new OrderWarehousResource($details);
     }
 
 }
